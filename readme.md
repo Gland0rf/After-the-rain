@@ -30,7 +30,16 @@ Watch puddles form, surfaces become wet, and the world slowly dry after a storm.
 - **Shader Loader:** Iris Shaders
 - **Recommended:** Sodium
 
+## Credits
+
+AfterTheRain is based on
+[Base-330](https://github.com/shaderLABS/Base-330)
+by shaderLABS, originally released under The Unlicense.
+
 ## License
+
+AfterTheRain is licensed under the GNU General Public
+License v3.0 (GPL-3.0).
 
 See [LICENSE](LICENSE) for details.
 
