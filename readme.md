@@ -24,15 +24,13 @@ Watch puddles form, surfaces become wet, and the world slowly dry after a storm.
 4. Navigate to **Options → Video Settings → Shader Packs**.
 5. Select **AfterTheRain** and apply.
 
-## 🎮 Compatibility
+## Compatibility
 
 - **Minecraft:** Java Edition
 - **Shader Loader:** Iris Shaders
 - **Recommended:** Sodium
 
-See the release page for supported Minecraft versions.
-
-## 📄 License
+## License
 
 See [LICENSE](LICENSE) for details.
 
