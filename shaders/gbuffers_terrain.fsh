@@ -6,6 +6,7 @@
 #define WET_DARKNESS 0.64 // [0.48 0.56 0.64 0.72 0.80] Darker at lower values
 #define PUDDLE_AMOUNT 0.85 // [0.00 0.25 0.50 0.70 0.85 1.00] How much puddling
 #define PUDDLE_SIZE 0.54 // [0.40 0.48 0.54 0.60 0.66] Larger at higher values
+#define GRASS_PUDDLES 0.80;
 
 // Iris uses these half-lives (in ticks) to create an after-rain drying period.
 const float wetnessHalflife = 90.0;
@@ -19,8 +20,8 @@ const int colortex3Format = RGBA16F;
 */
 const bool colortex2Clear = true;
 const bool colortex3Clear = true;
-const vec4 colortex2ClearColor = vec4(0.0);
-const vec4 colortex3ClearColor = vec4(0.0);
+const vec4 colortex2ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
+const vec4 colortex3ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 
 uniform sampler2D gtexture;
 uniform sampler2D lightmap;
@@ -80,11 +81,15 @@ void main() {
     } else if (vMaterial == 102) {
         darkness = 0.85; puddleSuitability = 0.25; glossSuitability = 0.65;
     } else if (vMaterial == 103) {
-        darkness = 0.95; puddleSuitability = 0.44; glossSuitability = 0.24;
+        darkness = 0.95; puddleSuitability = 0.56; glossSuitability = 0.24;
     } else if (vMaterial == 104) {
-        darkness = 0.60; puddleSuitability = 0.0; glossSuitability = 0.02;
+        // Individual leaves/grass blades get darker but never become puddle planes.
+        darkness = 0.62; puddleSuitability = 0.0; glossSuitability = 0.04;
     } else if (vMaterial == 105) {
         darkness = 0.78; puddleSuitability = 0.64; glossSuitability = 0.97;
+    } else if (vMaterial == 106) {
+        // A grass block is ground, not a floating blade of grass.
+        darkness = 0.88; puddleSuitability = GRASS_PUDDLES; glossSuitability = 0.18;
     }
 
     vec3 normal = normalize(vWorldNormal);
@@ -99,13 +104,14 @@ void main() {
 
     // Noise pockets appear gradually as the world becomes wet.
     float field = terrainPuddleNoise(vWorldPos.xz);
+    if (vMaterial == 106) field += 0.022; // Visible small patches on grass tops
     float threshold = 0.75 - PUDDLE_SIZE * 0.38;
     threshold += (1.0 - wetness) * 0.18;
     float puddleShape = smoothstep(threshold - 0.075, threshold + 0.075, field);
     float puddle = puddleShape * puddleSuitability * PUDDLE_AMOUNT;
     puddle *= up * skyExposure * smoothstep(0.12, 0.85, wetness);
 
-    outColor.rgb *= 1.0 - puddle * 0.18;
+    outColor.rgb *= 1.0 - puddle * (vMaterial == 106 ? 0.12 : 0.18);
 
     // colortex2 = normal RGB, compressed view distance A (for an
     // occlusion sanity check when an entity covers a terrain pixel).

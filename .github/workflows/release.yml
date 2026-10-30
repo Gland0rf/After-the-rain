@@ -1,0 +1,36 @@
+
+name: Release AfterTheRain
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Build ZIP
+        run: |
+          test -f shaders/shaders.properties
+          test -f shaders/gbuffers_terrain.fsh
+
+          mkdir -p dist
+
+          zip -r "dist/AfterTheRain-${GITHUB_REF_NAME}.zip" \
+            shaders readme.md LICENSE
+
+          unzip -t "dist/AfterTheRain-${GITHUB_REF_NAME}.zip"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

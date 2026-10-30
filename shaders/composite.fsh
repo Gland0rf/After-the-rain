@@ -11,6 +11,7 @@ uniform mat4 gbufferProjectionInverse;
 uniform vec3 fogColor;
 uniform float rainStrength;
 uniform float wetness;
+uniform float worldTime;
 uniform int isEyeInWater;
 
 in vec2 uv;
@@ -30,7 +31,7 @@ void main() {
 #ifdef RAIN_COLOR_GRADE
 	float luminosity = dot(outColor.rgb, vec3(0.2126, 0.7152, 0.0722));
 	outColor.rgb = mix(outColor.rgb, vec3(luminosity), rain * 0.12);
-	outColor.rgb *= mix(vec3(1.0), vec3(0.96, 0.98, 1.035), rain * 0.72);
+	outColor.rgb *= mix(vec3(1.0), vec3(0.98, 0.99, 1.01), rain * 0.55);
 #endif
 
 #ifdef RAIN_FOG
@@ -43,7 +44,10 @@ void main() {
 		float fog = 1.0 - exp(-max(0.0, distanceToPixel - 8.0) * density);
 		fog *= intensity;
 		fog = clamp(fog, 0.0, 0.74);
-		vec3 mistColor = mix(fogColor, vec3(0.54, 0.60, 0.65), rain * 0.09);
+		float daylight = smoothstep(-0.18, 0.14, sin(float(worldTime) * 6.28318530718));
+		vec3 greyMist = mix(vec3(0.060, 0.073, 0.091),
+							vec3(0.38, 0.42, 0.45), daylight);
+		vec3 mistColor = mix(fogColor, greyMist, rain * 0.75);
 		outColor.rgb = mix(outColor.rgb, mistColor, fog);
 	}
 #endif
