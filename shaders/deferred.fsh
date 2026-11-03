@@ -6,6 +6,8 @@
 #define REFLECTION_QUALITY 2 // [0 1 2 3] 0 off, 1 fast, 2 balanced, 3 detailed
 #define REFLECTION_INTENSITY 0.85 // [0.40 0.60 0.85 1.00] Strength of reflections
 #define RAIN_RIPPLES // Animated ripple rings on puddle surfaces
+#define RAIN_SPLASHES // Tiny bright impacts on rain-exposed wet blocks
+
 
 #if REFLECTION_QUALITY == 0
     const int SSR_STEPS = 0;
@@ -54,8 +56,22 @@ float rainRing(vec2 worldXZ) {
     float age = fract(frameTimeCounter * (0.55 + 0.1 * seed) + seed);
     float radius = age * 0.64;
     float d = length(local);
-    float ring = exp(-pow((d - radius) * 39.0, 2.0));
+    float width = max(0.013, fwidth(d) * 0.80);
+    float ring = 1.0 - smoothstep(0.0, width, abs(d - radius));
     return ring * (1.0 - age) * smoothstep(0.0, 0.13, age);
+}
+
+// Very short-lived pinpricks where raindrops strike exposed wet stone.
+float rainImpact(vec2 worldXZ) {
+    vec2 tile = worldXZ * 3.1;
+    vec2 cell = floor(tile);
+    vec2 offset = vec2(hash2(cell + 9.7), hash2(cell + 21.3));
+    vec2 pos = fract(tile) - (offset * 0.66 + 0.17);
+    float seed = hash2(cell + 77.3);
+    float age = fract(frameTimeCounter * (1.5 + seed * 0.6) + seed);
+    float core = exp(-dot(pos, pos) * 330.0);
+    float flick = 1.0 - smoothstep(0.0, 0.14, age);
+    return core * flick;
 }
 
 // Screen-space ray march: this can only reflect objects visible on screen.
@@ -124,11 +140,14 @@ void main() {
 	float ring = 0.0;
 	if (puddle > 0.04 && rainStrength > 0.01) {
 		float baseRing = rainRing(worldPos.xz);
+        baseRing += rainRing(worldPos.xz * 1.41 + vec2(4.7, 13.1)) * 0.38;
 		ring = baseRing * rainStrength * puddle;
 		// Ripple normal movement should be subtle
 		float rx = rainRing(worldPos.xz + vec2(0.018, 0.0));
 		float ry = rainRing(worldPos.xz + vec2(0.0, 0.018));
-		normalWS = normalize(normalWS + vec3((rx - baseRing) * 0.18,
+		rx += rainRing((worldPos.xz + vec2(0.018, 0.0)) * 1.41 + vec2(4.7, 13.1)) * 0.38;
+        ry += rainRing((worldPos.xz + vec2(0.0, 0.018)) * 1.41 + vec2(4.7, 13.1)) * 0.38;
+        normalWS = normalize(normalWS + vec3((rx - baseRing) * 0.18,
 											0.0, (ry - baseRing) * 0.18) * puddle * rainStrength);
 		normalVS = normalize(mat3(gbufferModelView) * normalWS);
 	}
@@ -157,5 +176,13 @@ void main() {
 
     outColor.rgb = mix(scene.rgb, reflected, strength);
     // Thin, high-contrast rain rings sit over the reflection.
-    outColor.rgb += vec3(0.10, 0.13, 0.16) * ring;
+    outColor.rgb += vec3(0.115, 0.130, 0.140) * ring;
+
+#ifdef RAIN_SPLASHES
+    if (rainStrength > 0.04 && surface.g > 0.075 && normalWS.y > 0.78) {
+        float sparkle = rainImpact(worldPos.xz) * rainStrength *
+                        surface.g * (0.12 + 0.55 * puddle);
+        outColor.rgb += vec3(0.25, 0.30, 0.32) * sparkle;
+    }
+#endif
 }

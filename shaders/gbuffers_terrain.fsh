@@ -6,7 +6,7 @@
 #define WET_DARKNESS 0.64 // [0.48 0.56 0.64 0.72 0.80] Darker at lower values
 #define PUDDLE_AMOUNT 0.85 // [0.00 0.25 0.50 0.70 0.85 1.00] How much puddling
 #define PUDDLE_SIZE 0.54 // [0.40 0.48 0.54 0.60 0.66] Larger at higher values
-#define GRASS_PUDDLES 0.80;
+#define GRASS_PUDDLES 0.80 // [0.00 0.20 0.40 0.60 0.80 1.00]
 
 // Iris uses these half-lives (in ticks) to create an after-rain drying period.
 const float wetnessHalflife = 90.0;
@@ -70,7 +70,7 @@ void main() {
     if (outColor.a < alphaTestRef) discard;
 
     // 100 = stones, 101 = paths, 102 = wooden boards,
-    // 103 = soil, 104 = vegetation, 105 = tiles/metals.
+    // 103 = soil, 104 = vegetation, 105 = tiles/metals, 106 = grass blocks.
     float darkness = 0.0;
     float puddleSuitability = 0.0;
     float glossSuitability = 0.0;
@@ -112,6 +112,8 @@ void main() {
     puddle *= up * skyExposure * smoothstep(0.12, 0.85, wetness);
 
     outColor.rgb *= 1.0 - puddle * (vMaterial == 106 ? 0.12 : 0.18);
+    outColor.rgb *= mix(vec3(1.0), vec3(0.973, 0.987, 1.0),
+                        clamp(wetSurface * 0.60, 0.0, 1.0));
 
     // colortex2 = normal RGB, compressed view distance A (for an
     // occlusion sanity check when an entity covers a terrain pixel).
@@ -119,5 +121,6 @@ void main() {
                              clamp(-vViewPos.z / 320.0, 0.0, 1.0));
     // colortex3 = puddle, surface wetness, gloss, validity flag.
     outWetData = vec4(puddle, wetSurface,
-                      glossSuitability * wetness * skyExposure, 1.0);
+                      glossSuitability * wetness * skyExposure *
+                      (0.88 + 0.12 * valueNoise2D(vWorldPos.xz * 5.0)), 1.0);
 }
