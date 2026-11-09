@@ -1,16 +1,12 @@
 #version 330 compatibility
+#include "/lib/exposure.glsl"
+#include "/lib/materials.glsl"
 
 /* DRAWBUFFERS:023 */
 
-// Iris user-editable settings; in-game: Shader Pack Settings > Ground.
-#define WET_DARKNESS 0.64 // [0.48 0.56 0.64 0.72 0.80] Darker at lower values
-#define PUDDLE_AMOUNT 0.85 // [0.00 0.25 0.50 0.70 0.85 1.00] How much puddling
-#define PUDDLE_SIZE 0.54 // [0.40 0.48 0.54 0.60 0.66] Larger at higher values
-#define GRASS_PUDDLES 0.80 // [0.00 0.20 0.40 0.60 0.80 1.00]
-
 // Iris uses these half-lives (in ticks) to create an after-rain drying period.
-const float wetnessHalflife = 90.0;
-const float drynessHalflife = 1400.0;
+const float wetnessHalflife = WETTING_TIME;
+const float drynessHalflife = DRYING_TIME;
 
 // Additional render targets store terrain normals/depth and wetness/puddles.
 
@@ -26,10 +22,10 @@ const vec4 colortex3ClearColor = vec4(0.0, 0.0, 0.0, 0.0);
 uniform sampler2D gtexture;
 uniform sampler2D lightmap;
 uniform float alphaTestRef;
-uniform float wetness;
 
 in vec2 vUV;
 in vec2 vLightUV;
+in vec2 vBlockUV;
 in vec4 vTint;
 in vec3 vWorldNormal;
 in vec3 vWorldPos;
@@ -68,6 +64,11 @@ void main() {
     outColor = texture(gtexture, vUV) * vTint;
     outColor *= texture(lightmap, vLightUV);
     if (outColor.a < alphaTestRef) discard;
+    vec3 normal = normalize(vWorldNormal);
+    outNormalAndDepth = vec4(normal * 0.5 + 0.5, -vViewPos.z);
+    outWetData = vec4(0.0);
+    float wet = atrWetness();
+    if (wet < 0.0005) return;
 
     // 100 = stones, 101 = paths, 102 = wooden boards,
     // 103 = soil, 104 = vegetation, 105 = tiles/metals, 106 = grass blocks.
@@ -79,10 +80,11 @@ void main() {
     } else if (vMaterial == 101) {
         darkness = 0.90; puddleSuitability = 0.80; glossSuitability = 0.60;
     } else if (vMaterial == 102) {
-        darkness = 0.85; puddleSuitability = 0.25; glossSuitability = 0.65;
+        darkness = 0.85; puddleSuitability = 0.16; glossSuitability = 0.42;
     } else if (vMaterial == 103) {
         darkness = 0.95; puddleSuitability = 0.56; glossSuitability = 0.24;
-    } else if (vMaterial == 104) {
+    } else if (vMaterial == 104 || vMaterial == 107 || vMaterial == 108 ||
+               vMaterial == 110 || vMaterial == 111) {
         // Individual leaves/grass blades get darker but never become puddle planes.
         darkness = 0.62; puddleSuitability = 0.0; glossSuitability = 0.04;
     } else if (vMaterial == 105) {
@@ -92,35 +94,55 @@ void main() {
         darkness = 0.88; puddleSuitability = GRASS_PUDDLES; glossSuitability = 0.18;
     }
 
-    vec3 normal = normalize(vWorldNormal);
-    // Sky light is an *approximation* of rain exposure, not a roof raycast.
-    float skyExposure = smoothstep(0.68, 0.96, vLightUV.y);
+    if (darkness == 0.0) return;
+    float skyExposure = atrExposure(vWorldPos + normal * 0.06, vLightUV.y);
+    // Material response and spatial variation leave damp islands as puddles dry.
+    float dryingPower = vMaterial == 102 ? 0.68 : (vMaterial == 103 ? 0.78 : 1.15);
+    if (vMaterial == 105) dryingPower = 1.40;
+    float moisture = pow(wet, dryingPower);
+    vec2 materialPattern = atrMaterialPattern(vBlockUV, vMaterial, vWorldPos);
+    moisture *= materialPattern.x;
+    puddleSuitability *= materialPattern.y;
+    float dryPatch = valueNoise2D(vWorldPos.xz * 0.71 + vec2(14.3, 8.1));
+    moisture *= mix(0.72 + dryPatch * 0.28, 1.0, wet);
     float up = smoothstep(0.77, 0.97, normal.y);
-    float wetSurface = wetness * skyExposure * darkness * mix(0.23, 1.0, up);
+    float wetSurface = moisture * skyExposure * darkness * mix(0.23, 1.0, up);
+    float runoff = 0.0;
+    if (vMaterial == 100 || vMaterial == 101 || vMaterial == 105)
+        runoff = atrRunoff(vWorldPos, normal) * atrRain() * skyExposure;
 
     // Dry = exact starter-pack color; wet = dark damp material.
     float darker = mix(1.0, WET_DARKNESS, wetSurface);
     outColor.rgb *= darker;
+    outColor.rgb *= 1.0 - runoff * 0.12;
 
     // Noise pockets appear gradually as the world becomes wet.
-    float field = terrainPuddleNoise(vWorldPos.xz);
+    float field = terrainPuddleNoise(vWorldPos.xz * (0.54 / PUDDLE_SIZE));
     if (vMaterial == 106) field += 0.022; // Visible small patches on grass tops
-    float threshold = 0.75 - PUDDLE_SIZE * 0.38;
-    threshold += (1.0 - wetness) * 0.18;
+    float threshold = 0.545 + (1.0 - wet) * (0.18 + dryPatch * 0.14);
     float puddleShape = smoothstep(threshold - 0.075, threshold + 0.075, field);
     float puddle = puddleShape * puddleSuitability * PUDDLE_AMOUNT;
-    puddle *= up * skyExposure * smoothstep(0.12, 0.85, wetness);
+    puddle *= up * skyExposure * smoothstep(0.12, 0.85, pow(wet, dryingPower));
 
     outColor.rgb *= 1.0 - puddle * (vMaterial == 106 ? 0.12 : 0.18);
     outColor.rgb *= mix(vec3(1.0), vec3(0.973, 0.987, 1.0),
                         clamp(wetSurface * 0.60, 0.0, 1.0));
 
-    // colortex2 = normal RGB, compressed view distance A (for an
-    // occlusion sanity check when an entity covers a terrain pixel).
+    // colortex2 = normal RGB, view depth in blocks A (RGBA16F).
     outNormalAndDepth = vec4(normal * 0.5 + 0.5,
-                             clamp(-vViewPos.z / 320.0, 0.0, 1.0));
-    // colortex3 = puddle, surface wetness, gloss, validity flag.
+                             -vViewPos.z);
+    float roughness = 0.65;
+    if (vMaterial == 101) roughness = 0.78;
+    if (vMaterial == 102) roughness = 0.55;
+    if (vMaterial == 103 || vMaterial == 106) roughness = 0.88;
+    if (vMaterial == 104 || vMaterial == 107 || vMaterial == 108 ||
+        vMaterial == 110 || vMaterial == 111) roughness = 0.95;
+    if (vMaterial == 105) roughness = 0.16;
+    roughness = mix(roughness, 0.045, puddle);
+    // colortex3 = puddle, wetness, gloss, roughness+1 (zero = invalid).
     outWetData = vec4(puddle, wetSurface,
-                      glossSuitability * wetness * skyExposure *
-                      (0.88 + 0.12 * valueNoise2D(vWorldPos.xz * 5.0)), 1.0);
+                      glossSuitability * moisture * skyExposure *
+                      (0.88 + 0.12 * valueNoise2D(vWorldPos.xz * 5.0)), 1.0 + roughness);
+    outColor.rgb += vec3(0.075, 0.085, 0.11) * atrLightning() * skyExposure *
+                    mix(0.35, 1.0, up);
 }

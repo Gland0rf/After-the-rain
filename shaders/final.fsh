@@ -1,16 +1,10 @@
 #version 330 compatibility
+#include "/lib/exposure.glsl"
 
-#define STORM_GLOW // Subtle halo around bright lights in dark rainy scenes
-#define STORM_VIGNETTE // Very light edge shading while it rains
-//#define LENS_DROPLETS // Optional small lens droplets, mainly at screen edges
 
 uniform sampler2D colortex0;
-uniform float rainStrength;
-uniform float wetness;
-uniform float frameTimeCounter;
 uniform float viewWidth;
 uniform float viewHeight;
-uniform int worldTime;
 uniform int isEyeInWater;
 uniform int biome_precipitation;
 uniform ivec2 eyeBrightnessSmooth;
@@ -30,8 +24,8 @@ vec3 highlight(vec2 sampleUV) {
 
 void main() {
     color = texture(colortex0, uv);
-    float rain = clamp(rainStrength, 0.0, 1.0);
-    if (max(rain, wetness) < 0.002 || isEyeInWater != 0) return;
+    float rain = atrRain();
+    if (max(rain, atrWetness()) < 0.002 || isEyeInWater != 0) return;
 
     float day = smoothstep(-0.20, 0.20,
                  sin(float(worldTime) * 6.2831853 / 24000.0));
@@ -61,8 +55,7 @@ void main() {
 
 #ifdef LENS_DROPLETS
     // Off by default: a tiny refractive film, not large blurry splotches.
-    float skyAccess = smoothstep(0.30, 0.78,
-                                  float(eyeBrightnessSmooth.y) / 240.0);
+    float skyAccess = atrExposure(cameraPosition, float(eyeBrightnessSmooth.y) / 240.0);
     float lensRain = rain * skyAccess * float(biome_precipitation == 1);
     if (lensRain > 0.03) {
         float aspect = viewWidth / viewHeight;
