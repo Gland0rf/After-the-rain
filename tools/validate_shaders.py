@@ -99,13 +99,23 @@ def variants():
     result["FEATURES_OFF"] = {k: False if isinstance(v, bool) else v for k, v in defaults.items()}
     result["FEATURES_OFF"].update(ROOF_DRIPS="0", LIGHTNING_RESPONSE="0.00")
     for path in sorted(SHADERS.glob("*.*sh")):
-        expand(path)
+        source = expand(path)
+        # These are parsed by Iris on the CPU before GLSL compilation. Unlike
+        # GLSL, its directive parser does not expand single-value constructors.
+        for key, arguments in re.findall(
+            r"const\s+vec4\s+((?:colortex|shadowcolor)\d+ClearColor)\s*=\s*vec4\s*\(([^)]*)\)\s*;",
+            source,
+        ):
+            components = [part.strip() for part in arguments.split(",")]
+            assert len(components) == 4, f"{path.name}: Iris needs four explicit components for {key}"
+            for component in components:
+                float(component.rstrip("fF"))
     # The overhead projection must put roofs in front of the ground, and retain
     # top-face winding. This catches sign changes that compile successfully.
     def roof_depth(height):
         return -height / 512.0 * 0.5 + 0.5
     assert roof_depth(12.0) < roof_depth(0.0)
-    assert roof_depth(0.0) - 0.00004 > roof_depth(0.0625)
+    assert roof_depth(0.0625) < roof_depth(0.0)
     # Moisture must decline monotonically on every material, with dry = zero.
     for exponent in (0.68, 0.78, 1.15, 1.40):
         sequence = [(i / 100.0) ** exponent for i in range(101)]
@@ -239,7 +249,12 @@ def prepare(path, options):
     # Iris injects stage constants before compilation. Values are immaterial for
     # compilation/link validation; runtime rendering is checked in Minecraft.
     text = text.replace("#version 330 compatibility", "#version 330 compatibility\n"
-                        "#define MC_RENDER_STAGE_SKY 1\n#define MC_RENDER_STAGE_RAIN_SNOW 2", 1)
+                        "#define IS_IRIS 1\n"
+                        "#define MC_RENDER_STAGE_SKY 1\n#define MC_RENDER_STAGE_RAIN_SNOW 2\n"
+                        "#define MC_RENDER_STAGE_TERRAIN_SOLID 3\n"
+                        "#define MC_RENDER_STAGE_TERRAIN_CUTOUT 4\n"
+                        "#define MC_RENDER_STAGE_TERRAIN_CUTOUT_MIPPED 5\n"
+                        "#define MC_RENDER_STAGE_TERRAIN_TRANSLUCENT 6", 1)
     return text
 
 
@@ -268,6 +283,7 @@ def render_shelter_fixture(context):
     uniform_location = fn("glGetUniformLocation", integer, uint, C.c_char_p)
     matrix = fn("glUniformMatrix4fv", None, integer, integer, C.c_ubyte, C.POINTER(C.c_float))
     uniform3 = fn("glUniform3f", None, integer, C.c_float, C.c_float, C.c_float)
+    uniform3i = fn("glUniform3i", None, integer, integer, integer, integer)
     uniform1 = fn("glUniform1f", None, integer, C.c_float)
     uniform_int = fn("glUniform1i", None, integer, integer)
     active_texture = fn("glActiveTexture", None, uint)
@@ -282,6 +298,13 @@ def render_shelter_fixture(context):
     delete_tex = fn("glDeleteTextures", None, integer, C.POINTER(uint))
     delete_fbo = fn("glDeleteFramebuffers", None, integer, C.POINTER(uint))
     textures, framebuffers, shaders, programs = [], [], [], []
+
+    def set_camera(program, camera):
+        whole = tuple(math.floor(axis) for axis in camera)
+        fraction = tuple(axis - value for axis, value in zip(camera, whole))
+        uniform3(uniform_location(program, b"cameraPosition"), *camera)
+        uniform3i(uniform_location(program, b"cameraPositionInt"), *whole)
+        uniform3(uniform_location(program, b"cameraPositionFract"), *fraction)
 
     def texture(size, internal, pixel_format, data=None):
         name = uint()
@@ -298,7 +321,9 @@ def render_shelter_fixture(context):
         gen_fbo(1, C.byref(name))
         framebuffers.append(name)
         bind_fbo(0x8D40, name.value)
-        color = texture(size, 0x881A, 0x1908)  # RGBA16F
+        # The real roof map stores height/validity as RG32F. The probe target
+        # remains RGBA16F to retain the terrain-metadata precision check.
+        color = texture(size, 0x8230 if depth else 0x881A, 0x1908)
         attach_tex(0x8D40, 0x8CE0, 0x0DE1, color, 0)
         depth_texture = texture(size, 0x81A6, 0x1902) if depth else 0
         if depth:
@@ -316,20 +341,23 @@ def render_shelter_fixture(context):
         shadow = context.program(v, f, "roof fixture", retain=True)
         programs.append(shadow)
         roof_depth = framebuffer(2048, depth=True)
+        roof_height = textures[-2].value
         roof_framebuffer = framebuffers[-1].value
         white = texture(1, 0x881A, 0x1908, (C.c_float * 4)(1, 1, 1, 1))
         use_program(shadow)
+        uniform_int(uniform_location(shadow, b"renderStage"), 3)
         identity = (C.c_float * 16)(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1)
         matrix(uniform_location(shadow, b"shadowModelViewInverse"), 1, 0, identity)
         v = context.shader("#version 330 compatibility\nvoid main(){gl_Position=gl_Vertex;}",
                            0x8B31, "exposure fixture vertex")
         shaders.append(v)
-        fragment = "#version 330 compatibility\n" + expand(SHADERS / "lib/exposure.glsl") + """
+        fragment = "#version 330 compatibility\n#define IS_IRIS 1\n" + expand(SHADERS / "lib/exposure.glsl") + """
+uniform vec3 fixtureRelativeOrigin;
 layout(location=0) out vec4 color;
 void main() {
-    vec3 world = vec3((gl_FragCoord.x / 8.0 - 0.5) * 80.0, 0.0, 0.0);
-    if (gl_FragCoord.x < 1.0) world.x = -0.03; // a partially covered roof-edge sample
-    color = vec4(atrExposure(world, 1.0), 0.0, 0.0, 1.75);
+    vec3 local = vec3((gl_FragCoord.x / 8.0 - 0.5) * 80.0, 0.0, 0.0);
+    if (gl_FragCoord.x < 1.0) local.x = -0.03; // a partially covered roof-edge sample
+    color = vec4(atrExposureRelative(fixtureRelativeOrigin + local, 1.0), 0.0, 0.0, 1.75);
 }
 """
         f = context.shader(fragment, 0x8B30, "exposure fixture fragment")
@@ -338,30 +366,36 @@ void main() {
         programs.append(probe)
         framebuffer(8)
         probe_framebuffer = framebuffers[-1].value
-        edge_exposure = []
-        for camera in ((0, 0, 0), (0.02, 0, 0.04), (0.10, 0.5, 0.16), (1.7, 1.6, -0.45)):
+        edge_exposure = {}
+        positions = ((0, 0, 0), (0.02, 0, 0.04), (0.10, 0.5, 0.16),
+                     (1.7, 1.6, -0.45), (3.125, 2.35, -3.2))
+        cameras = [(origin, tuple(a + b for a, b in zip(origin, delta)))
+                   for origin in ((0, 0, 0), (16384, 192, -16384))
+                   for delta in positions]
+        for origin, camera in cameras:
             bind_fbo(0x8D40, roof_framebuffer)
             viewport(0, 0, 2048, 2048)
             bind_tex(0x0DE1, white)
             use_program(shadow)
-            uniform3(uniform_location(shadow, b"cameraPosition"), *camera)
-            matrix_mode(0x1700)  # modelview contains camera-relative geometry
+            set_camera(shadow, camera)
+            matrix_mode(0x1700)
             load_identity()
-            translate(*[-axis for axis in camera])
             clear(0x4000 | 0x0100)
             enable(0x0B71)
             enable(0x0B44)
             begin(0x0007)
             for x, z in ((-96, -96), (-96, 96), (96, 96), (96, -96)):
-                vertex(x, 0, z)
+                vertex(x + origin[0] - camera[0], origin[1] - camera[1], z + origin[2] - camera[2])
             for x, z in ((-48, -48), (-48, 48), (0, 48), (0, -48)):
-                vertex(x, 0.0625, z)
+                vertex(x + origin[0] - camera[0], 0.0625 + origin[1] - camera[1], z + origin[2] - camera[2])
             end()
             bind_fbo(0x8D40, probe_framebuffer)
             viewport(0, 0, 8, 8)
-            bind_tex(0x0DE1, roof_depth)
+            bind_tex(0x0DE1, roof_height)
             use_program(probe)
-            uniform3(uniform_location(probe, b"cameraPosition"), *camera)
+            set_camera(probe, camera)
+            uniform3(uniform_location(probe, b"fixtureRelativeOrigin"),
+                     *[a - b for a, b in zip(origin, camera)])
             disable(0x0B71)
             begin(0x0007)
             for x, y in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
@@ -371,12 +405,12 @@ void main() {
             read(0, 0, 8, 8, 0x1908, 0x1406, pixels)
             sheltered = pixels[(4 * 8 + 1) * 4]
             exposed = pixels[(4 * 8 + 6) * 4]
-            edge_exposure.append(pixels[(4 * 8) * 4])
+            edge_exposure.setdefault(origin, []).append(pixels[(4 * 8) * 4])
             assert sheltered < 0.05 and exposed > 0.95, (camera, sheltered, exposed)
             assert abs(pixels[3] - 1.75) < 0.001, "RGBA16F metadata clamped"
-        spread = max(edge_exposure) - min(edge_exposure)
+        spread = max(max(samples) - min(samples) for samples in edge_exposure.values())
         assert spread < 0.01, f"Roof edge shifts with camera: {edge_exposure}"
-        print(f"GPU roof fixture passed at four camera positions; edge exposure spread={spread:.5f}.")
+        print(f"GPU roof fixture passed across movement, recentering and larger world coordinates; edge exposure spread={spread:.5f}.")
 
         # Render the actual deferred pass on a uniform damp-wood fixture while
         # changing view direction. A rough film must not turn into pale mirrors.

@@ -53,6 +53,8 @@ Lightning Flash Strength controls the extra response to rendered lightning bolts
 ### Rendering limits
 
 - Roof detection is strongest within about 85 blocks horizontally and blends to skylight-based exposure near the edge of its 192-block square map. It needs loaded terrain and adds a geometry pass, including during clear weather. Turn it off or choose Fast to avoid that cost.
+- The shelter map stores world height and validity in a 32-bit float RG buffer. Terrain positions use Iris's camera-relative vertex coordinates directly, keeping roof/ground classification independent of camera rotation and depth-buffer decoding.
+- Roof sampling keeps those relative positions through the fragment stage. A three-block grid (32 map texels) uses Iris's separate integer/fractional camera components so small camera movements do not change the map's sub-texel alignment.
 - Biome precipitation is taken from the camera's biome and blended across borders. This prevents lasting rain wetness in dry and snowy biomes, but cannot classify each distant surface independently. The effects are also disabled in dimensions without skylight.
 - Screen-space reflections show opaque objects visible on screen. Off-screen misses use the storm sky, not off-screen buildings; confidence fades at screen edges and uncertain depth intersections. Transparent objects are not traced.
 - Drying uses smoothed weather history and material response curves, not saved water amounts for individual blocks. Building a roof or reloading the shaderpack does not preserve per-block wetness history.
@@ -61,7 +63,7 @@ Lightning Flash Strength controls the extra response to rendered lightning bolts
 
 ## Development checks
 
-Run `python tools/validate_shaders.py` on Windows. The validator checks menus, profiles, material mappings and includes, compiles and links every shader pair across eight configurations on a hidden OpenGL context, renders roof exposure at four camera positions using the full-resolution map, and checks the actual deferred pass on a damp-wood movement fixture. It needs no additional Python packages. `--static-only` skips GPU checks.
+Run `python tools/validate_shaders.py` on Windows. The validator checks menus, profiles, material mappings and includes, compiles and links every shader pair across eight configurations on a hidden OpenGL context, renders roof exposure across camera movement, grid recentering and larger world coordinates using the full-resolution map, and checks the actual deferred pass on a damp-wood movement fixture. It needs no additional Python packages. `--static-only` skips GPU checks.
 
 The native validator does not run Iris's shader patcher or Minecraft. In game, check clear weather, rain, thunder, and drying; compare stone, wood, grass, and polished blocks; move and turn on a wet wooden platform; walk under solid and glass roofs; inspect nearby roof-edge drips and glass trails; view water from above; cross desert/snow biome borders; and switch all three profiles. After rain, check cloud breaks and the optional rainbow opposite a low sun. Visual quality and frame time still need in-game evaluation.
 

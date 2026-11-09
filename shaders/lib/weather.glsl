@@ -11,6 +11,8 @@ uniform float atrLightningFlash;
 uniform int worldTime;
 uniform bool hasSkylight;
 uniform vec3 cameraPosition;
+uniform ivec3 cameraPositionInt;
+uniform vec3 cameraPositionFract;
 uniform vec3 fogColor;
 uniform vec3 skyColor;
 uniform vec3 sunPosition;

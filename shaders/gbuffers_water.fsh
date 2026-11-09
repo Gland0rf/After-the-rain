@@ -13,6 +13,7 @@ in vec2 lmcoord;
 in vec2 texcoord;
 in vec4 glcolor;
 in vec3 waterWorldPos;
+in vec3 waterCameraRelative;
 in vec3 waterWorldNormal;
 flat in int waterMaterial;
 
@@ -24,7 +25,7 @@ void main() {
 	color *= texture(lightmap, lmcoord);
     float glassRunoff = 0.0;
     if (waterMaterial == 112 && atrRain() > 0.002) {
-        float exposed = atrExposure(waterWorldPos + waterWorldNormal * 0.06, lmcoord.y);
+        float exposed = atrExposureRelative(waterCameraRelative + waterWorldNormal * 0.06, lmcoord.y);
         glassRunoff = atrRunoff(waterWorldPos, waterWorldNormal) * exposed * atrRain();
         color.rgb = mix(color.rgb, color.rgb * 0.82 + vec3(0.12, 0.14, 0.17), glassRunoff * 0.55);
         color.a = clamp(color.a + glassRunoff * 0.06, 0.0, 1.0);
@@ -34,12 +35,12 @@ void main() {
     if (color.a < alphaTestRef && glassRunoff < 0.01) discard;
     if (waterMaterial == 109 || waterMaterial == 112)
         color.rgb += vec3(0.075, 0.085, 0.11) * atrLightning() *
-                     atrExposure(waterWorldPos, lmcoord.y);
+                     atrExposureRelative(waterCameraRelative, lmcoord.y);
 #ifdef WATER_RIPPLES
     // Only mapped water top faces: glass, ice and lava keep vanilla shading.
     float rain = atrRain();
     if (waterMaterial == 109 && waterWorldNormal.y > 0.8 && rain > 0.002) {
-        float exposed = atrExposure(waterWorldPos, lmcoord.y);
+        float exposed = atrExposureRelative(waterCameraRelative, lmcoord.y);
         float amount = rain * exposed;
         if (amount > 0.002) {
             vec3 ripple = atrRipple(waterWorldPos.xz);

@@ -13,12 +13,18 @@ out vec2 vBlockUV;
 out vec4 vTint;
 out vec3 vWorldNormal;
 out vec3 vWorldPos;
+out vec3 vCameraRelative;
 out vec3 vViewPos;
 flat out int vMaterial;
 
 void main() {
     vec4 viewPosition = gl_ModelViewMatrix * gl_Vertex;
     vec3 world = (gbufferModelViewInverse * viewPosition).xyz + cameraPosition;
+#ifdef IS_IRIS
+    // Terrain vertices are camera-relative in Iris's Sodium renderer. Keep
+    // wetness coordinates independent of camera rotation and inverse matrices.
+    world = gl_Vertex.xyz + cameraPosition;
+#endif
     vec3 offset = atrFoliageOffset(world, int(mc_Entity.x + 0.5),
                                   float(gl_MultiTexCoord0.y < mc_midTexCoord.y));
     viewPosition.xyz += transpose(mat3(gbufferModelViewInverse)) * offset;
@@ -31,8 +37,15 @@ void main() {
     vTint = gl_Color;
 
     vViewPos = viewPosition.xyz;
-    vWorldPos = (gbufferModelViewInverse * viewPosition).xyz + cameraPosition;
+    vWorldPos = world + offset;
+    vCameraRelative = (gbufferModelViewInverse * viewPosition).xyz;
+#ifdef IS_IRIS
+    vCameraRelative = gl_Vertex.xyz + offset;
+#endif
     vec3 viewNormal = normalize(gl_NormalMatrix * gl_Normal);
     vWorldNormal = normalize(mat3(gbufferModelViewInverse) * viewNormal);
+#ifdef IS_IRIS
+    vWorldNormal = normalize(gl_Normal);
+#endif
     vMaterial = int(mc_Entity.x + 0.5);
 }

@@ -29,6 +29,7 @@ in vec2 vBlockUV;
 in vec4 vTint;
 in vec3 vWorldNormal;
 in vec3 vWorldPos;
+in vec3 vCameraRelative;
 in vec3 vViewPos;
 flat in int vMaterial;
 
@@ -95,7 +96,7 @@ void main() {
     }
 
     if (darkness == 0.0) return;
-    float skyExposure = atrExposure(vWorldPos + normal * 0.06, vLightUV.y);
+    float skyExposure = atrExposureRelative(vCameraRelative + normal * 0.06, vLightUV.y);
     // Material response and spatial variation leave damp islands as puddles dry.
     float dryingPower = vMaterial == 102 ? 0.68 : (vMaterial == 103 ? 0.78 : 1.15);
     if (vMaterial == 105) dryingPower = 1.40;
