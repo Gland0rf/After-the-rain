@@ -1,10 +1,11 @@
 #ifndef ATR_PRECIPITATION
 #define ATR_PRECIPITATION
 #include "/lib/weather.glsl"
+#include "/lib/rain_lighting.glsl"
 uniform int biome_precipitation;
 
 vec4 atrPrecipitation(vec4 texel, vec4 tint, vec4 lighting, vec2 tex,
-                     float distanceToCamera, vec3 debugColor) {
+                     float distanceToCamera, vec2 lightUV, vec3 debugColor) {
     vec4 result = texel * tint * lighting;
     if (biome_precipitation == 2 || atrRain() < 0.015) return result;
 #if RAIN_SHADER_DEBUG == 1
@@ -21,6 +22,9 @@ vec4 atrPrecipitation(vec4 texel, vec4 tint, vec4 lighting, vec2 tex,
     float shower = mix(0.58, 1.0, smoothstep(0.07, 0.94, atrRain()));
     result.a = min(pow(clamp(result.a, 0.0, 1.0), 1.4) * streakProfile * distant *
                    shower * 0.31 * RAIN_STREAK_BRIGHTNESS, 0.17);
+#endif
+#if RAIN_SHADER_DEBUG == 0
+    result = atrLightRain(result, lighting.rgb, lightUV);
 #endif
     return result;
 }

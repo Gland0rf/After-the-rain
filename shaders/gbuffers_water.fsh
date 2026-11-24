@@ -3,9 +3,14 @@
 #include "/lib/sky.glsl"
 #include "/lib/ripples.glsl"
 #include "/lib/materials.glsl"
+#include "/lib/shore.glsl"
 
 uniform sampler2D lightmap;
 uniform sampler2D gtexture;
+#ifdef SHORE_DETAIL
+uniform sampler2D depthtex1;
+uniform mat4 gbufferProjectionInverse;
+#endif
 
 uniform float alphaTestRef = 0.1;
 
@@ -22,7 +27,8 @@ layout(location = 0) out vec4 color;
 
 void main() {
 	color = texture(gtexture, texcoord) * glcolor;
-	color *= texture(lightmap, lmcoord);
+    vec4 localLighting = texture(lightmap, lmcoord);
+    color *= localLighting;
     float glassRunoff = 0.0;
     if (waterMaterial == 112 && atrRain() > 0.002) {
         float exposed = atrExposureRelative(waterCameraRelative + waterWorldNormal * 0.06, lmcoord.y);
@@ -53,6 +59,25 @@ void main() {
             vec3 reflected = atrSky(reflect(viewDirection, n), waterWorldPos);
             color.rgb = mix(color.rgb, reflected, amount * (0.06 + fresnel * 0.30) * REFLECTION_INTENSITY);
             color.rgb += ripple.z * amount * vec3(0.018, 0.022, 0.024);
+        }
+    }
+#endif
+#ifdef SHORE_DETAIL
+    if (waterMaterial == 109 && waterWorldNormal.y > 0.8 && atrWetness() > 0.003) {
+        vec2 screenUV = gl_FragCoord.xy / vec2(textureSize(depthtex1, 0));
+        float opaqueDepth = texture(depthtex1, screenUV).r;
+        // The opaque depth copy precedes this water pass. Reject foreground
+        // geometry; sky behind the water represents deep water with no foam.
+        if (opaqueDepth > gl_FragCoord.z) {
+            float thickness = 32.0;
+            if (opaqueDepth < 0.999999) {
+                vec4 opaqueVS = gbufferProjectionInverse * vec4(screenUV * 2.0 - 1.0, opaqueDepth * 2.0 - 1.0, 1.0);
+                vec3 opaqueRelative = mat3(gbufferModelViewInverse) *
+                                      (opaqueVS.xyz / max(abs(opaqueVS.w), 0.00001));
+                thickness = max(0.0, waterCameraRelative.y - opaqueRelative.y);
+            }
+            float exposed = atrExposureRelative(waterCameraRelative, lmcoord.y);
+            color = atrShoreWater(color, thickness, waterWorldPos.xz, exposed, localLighting.rgb);
         }
     }
 #endif

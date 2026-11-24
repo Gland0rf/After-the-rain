@@ -10,6 +10,7 @@ vec3 atrSkyAmbient() {
 #ifdef STORM_SKY
     clear = mix(clear, overcast, clamp(atrRain() + atrWetness() * 0.04, 0.0, 1.0));
 #endif
+    clear *= mix(vec3(1.0), atrBiomeFogTint(), atrRain());
     return clamp(clear + vec3(0.12, 0.14, 0.19) * atrLightning(), 0.0, 1.0);
 }
 
@@ -109,6 +110,7 @@ vec3 atrSky(vec3 direction, vec3 origin) {
     stormSky += (field - 0.5) * vec3(0.085, 0.092, 0.10) * (0.30 + 0.70 * daylight);
 #endif
     stormSky *= 1.0 - smoothstep(0.35, 0.92, up) * storm * darkness * 0.10;
+    stormSky *= atrBiomeFogTint();
     return atrSkyFinish(mix(original, clamp(stormSky, 0.0, 1.0), storm), direction);
 #else
     return atrSkyFinish(original, direction);

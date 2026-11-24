@@ -14,5 +14,5 @@ void main() {
     vec4 lighting = texture(lightmap, lmcoord);
     color = texel * glcolor * lighting;
     if (color.a < alphaTestRef) discard;
-        color = atrPrecipitation(texel, glcolor, lighting, texcoord, precipitationDistance, vec3(1.0, 0.02, 0.90));
+        color = atrPrecipitation(texel, glcolor, lighting, texcoord, precipitationDistance, lmcoord, vec3(1.0, 0.02, 0.90));
 }

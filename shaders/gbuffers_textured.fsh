@@ -17,6 +17,6 @@ void main() {
     if (color.a < alphaTestRef) discard;
 #ifdef MC_RENDER_STAGE_RAIN_SNOW
     if (renderStage == MC_RENDER_STAGE_RAIN_SNOW)
-        color = atrPrecipitation(texel, glcolor, lighting, texcoord, precipitationDistance, vec3(1.0, 0.92, 0.05));
+        color = atrPrecipitation(texel, glcolor, lighting, texcoord, precipitationDistance, lmcoord, vec3(1.0, 0.92, 0.05));
 #endif
 }

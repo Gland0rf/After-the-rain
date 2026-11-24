@@ -1,6 +1,9 @@
 #version 330 compatibility
 #include "/lib/exposure.glsl"
 #include "/lib/materials.glsl"
+#include "/lib/pooling.glsl"
+#include "/lib/surface_details.glsl"
+#include "/lib/debug.glsl"
 
 /* DRAWBUFFERS:023 */
 
@@ -68,6 +71,20 @@ void main() {
     vec3 normal = normalize(vWorldNormal);
     outNormalAndDepth = vec4(normal * 0.5 + 0.5, -vViewPos.z);
     outWetData = vec4(0.0);
+#if WEATHER_DEBUG == 1
+    float debugExposure = atrExposureRelative(vCameraRelative + normal * 0.06, vLightUV.y);
+    outColor.rgb = mix(vec3(0.75, 0.08, 0.06), vec3(0.05, 0.75, 0.20), debugExposure);
+    return;
+#elif WEATHER_DEBUG == 3
+    float debugExposure = atrExposureRelative(vCameraRelative + normal * 0.06, vLightUV.y);
+    outColor.rgb = atrPoolingDebug(atrGroundRetention(vCameraRelative, normal, debugExposure));
+    return;
+#elif WEATHER_DEBUG == 4
+    outColor.rgb = atrMaterialDebug(vMaterial);
+    return;
+#elif WEATHER_DEBUG == 2 || WEATHER_DEBUG == 5
+    outColor.rgb = vec3(0.0);
+#endif
     float wet = atrWetness();
     if (wet < 0.0005) return;
 
@@ -100,6 +117,7 @@ void main() {
     // Material response and spatial variation leave damp islands as puddles dry.
     float dryingPower = vMaterial == 102 ? 0.68 : (vMaterial == 103 ? 0.78 : 1.15);
     if (vMaterial == 105) dryingPower = 1.40;
+    dryingPower *= atrBiomeDryPower();
     float moisture = pow(wet, dryingPower);
     vec2 materialPattern = atrMaterialPattern(vBlockUV, vMaterial, vWorldPos);
     moisture *= materialPattern.x;
@@ -121,9 +139,17 @@ void main() {
     float field = terrainPuddleNoise(vWorldPos.xz * (0.54 / PUDDLE_SIZE));
     if (vMaterial == 106) field += 0.022; // Visible small patches on grass tops
     float threshold = 0.545 + (1.0 - wet) * (0.18 + dryPatch * 0.14);
-    float puddleShape = smoothstep(threshold - 0.075, threshold + 0.075, field);
+    float retention = 1.0;
+    if (puddleSuitability > 0.01)
+        retention = atrGroundRetention(vCameraRelative, normal, skyExposure);
+    threshold -= (retention - 1.0) * 0.14;
+    vec2 edge = atrDryingEdge(field, threshold, wet, dryingPower);
+    float puddleShape = edge.x;
     float puddle = puddleShape * puddleSuitability * PUDDLE_AMOUNT;
     puddle *= up * skyExposure * smoothstep(0.12, 0.85, pow(wet, dryingPower));
+    puddle = clamp(puddle * retention, 0.0, 1.0);
+    float dampBorder = edge.y * up * skyExposure * puddleSuitability * PUDDLE_AMOUNT;
+    outColor.rgb *= 1.0 - dampBorder * 0.075;
 
     outColor.rgb *= 1.0 - puddle * (vMaterial == 106 ? 0.12 : 0.18);
     outColor.rgb *= mix(vec3(1.0), vec3(0.973, 0.987, 1.0),
@@ -146,4 +172,18 @@ void main() {
                       (0.88 + 0.12 * valueNoise2D(vWorldPos.xz * 5.0)), 1.0 + roughness);
     outColor.rgb += vec3(0.075, 0.085, 0.11) * atrLightning() * skyExposure *
                     mix(0.35, 1.0, up);
+    outColor.rgb = atrFoliageBeads(outColor.rgb, vBlockUV, normal, vCameraRelative,
+                                  skyExposure, vLightUV, vMaterial);
+#ifdef RAIN_SPLASHES
+    float splashDistance = 1.0 - smoothstep(16.0, 28.0, length(vCameraRelative));
+    if (atrRain() > 0.02 && up > 0.01 && skyExposure > 0.01 && splashDistance > 0.001) {
+        float splash = atrGroundSplash(vWorldPos.xz) * atrRain() * wetSurface * up *
+                       splashDistance * mix(0.35, 1.0, puddle);
+        float light = clamp(max(vLightUV.x, vLightUV.y * atrDaylight()), 0.08, 1.0);
+        outColor.rgb += vec3(0.13, 0.15, 0.17) * splash * light;
+    }
+#endif
+#if WEATHER_DEBUG == 2
+    outColor.rgb = vec3(puddle, wetSurface, skyExposure);
+#endif
 }

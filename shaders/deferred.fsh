@@ -32,19 +32,6 @@ vec3 toView(vec2 tex, float depth) {
 	return h.xyz / max(abs(h.w), 0.00001) * sign(h.w);
 }
 
-// Very short-lived pinpricks where raindrops strike exposed wet stone.
-float rainImpact(vec2 worldXZ) {
-    vec2 tile = worldXZ * 3.1;
-    vec2 cell = floor(tile);
-    vec2 offset = vec2(atrHash(cell + 9.7), atrHash(cell + 21.3));
-    vec2 pos = fract(tile) - (offset * 0.66 + 0.17);
-    float seed = atrHash(cell + 77.3);
-    float age = fract(frameTimeCounter * (1.5 + seed * 0.6) + seed);
-    float core = exp(-dot(pos, pos) * 330.0);
-    float flick = 1.0 - smoothstep(0.0, 0.14, age);
-    return core * flick;
-}
-
 // Depth-aware roughness blur keeps unrelated foreground silhouettes out.
 vec3 reflectionSample(vec2 tex, float roughness, float travel) {
     vec3 centre = texture(colortex0, tex).rgb;
@@ -137,6 +124,11 @@ vec3 traceReflection(vec3 originVS, vec3 normalVS, float roughness,
 void main() {
 	vec4 scene = texture(colortex0, uv);
 	outColor = scene;
+#if WEATHER_DEBUG > 0 && WEATHER_DEBUG < 5
+    return;
+#elif WEATHER_DEBUG == 5
+    outColor.rgb = vec3(0.0);
+#endif
 	vec4 surface = texture(colortex3, uv);
 	if (surface.a < 0.5 || max(surface.r, surface.b) < 0.015) return;
 
@@ -201,12 +193,9 @@ void main() {
     outColor.rgb = mix(scene.rgb, reflected, strength);
     // Thin, high-contrast rain rings sit over the reflection.
     outColor.rgb += vec3(0.115, 0.130, 0.140) * ring;
-
-#ifdef RAIN_SPLASHES
-    if (rain > 0.04 && surface.g > 0.075 && normalWS.y > 0.78) {
-        float sparkle = rainImpact(worldPos.xz) * rain *
-                        surface.g * (0.12 + 0.55 * puddle);
-        outColor.rgb += vec3(0.25, 0.30, 0.32) * sparkle;
-    }
+#if WEATHER_DEBUG == 5
+    // Red = screen-space hit confidence, green = reflection strength,
+    // blue = the fraction allowed to use directional pool reflections.
+    outColor.rgb = vec3(confidence, strength, directional);
 #endif
 }

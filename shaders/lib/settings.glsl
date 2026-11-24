@@ -5,6 +5,11 @@
 #define PUDDLE_AMOUNT 0.85 // [0.00 0.25 0.50 0.70 0.85 1.00]
 #define PUDDLE_SIZE 0.54 // [0.40 0.48 0.54 0.60 0.66]
 #define GRASS_PUDDLES 0.80 // [0.00 0.20 0.40 0.60 0.80 1.00]
+#define POOLING_QUALITY 1 // [0 1 2] Off, four-neighbour or eight-neighbour terrain pooling
+#define DRYING_EDGES // Fragmenting pools leave a narrow damp border
+#define WET_FOLIAGE // Restrained water beads on leaves and grass
+#define SHORE_DETAIL // Shallow-water tint and a soft shoreline foam fringe
+#define WET_ENTITIES // Subtle rain exposure on mobs and third-person players
 #define WETTING_TIME 90.0 // [30.0 60.0 90.0 180.0 360.0]
 #define DRYING_TIME 1400.0 // [400.0 800.0 1400.0 2400.0 4000.0]
 #define RAIN_SHELTER // Overhead roof detection near the camera
@@ -24,6 +29,8 @@
 #define WIND_GUSTS
 #define FOLIAGE_WIND // Restrained movement during rain only
 #define SILVER_RAIN
+#define LAMPLIT_RAIN // Warm block light on vanilla rain quads
+#define LAMPLIGHT_INTENSITY 0.65 // [0.00 0.35 0.65 1.00]
 #define RAIN_SHADER_DEBUG 0 // [0 1]
 #define STORM_SKY
 #define STORM_CLOUDS
@@ -32,6 +39,12 @@
 #define STORM_SKY_DARKNESS 0.72 // [0.35 0.50 0.72 0.88 1.00]
 #define STORM_CLOUD_WIND 0.45 // [0.10 0.25 0.45 0.70 1.00]
 #define THUNDER_ATMOSPHERE
+#define BIOME_WEATHER // Humidity and temperature affect mist, colour and drying
+#define DISTANT_RAIN // Moving world-space curtains beyond the nearby rain
+#define RAIN_CURTAIN_AMOUNT 0.55 // [0.00 0.25 0.55 0.85]
+#define SUN_SHAFTS // Half-resolution rays from sky openings after rain
+#define SUN_SHAFT_STRENGTH 0.35 // [0.00 0.20 0.35 0.60]
+#define ATMOSPHERE_QUALITY 1 // [0 1 2] Sampling quality for curtains and sun shafts
 #define LIGHTNING_RESPONSE 0.35 // [0.00 0.20 0.35 0.50 0.75]
 #define CLEARING_SKY // Cloud breaks and warmer light while the ground dries
 //#define AFTER_RAIN_RAINBOW // Faint sun-aligned rainbow as a storm clears
@@ -42,5 +55,7 @@
 #define STORM_GLOW
 #define STORM_VIGNETTE
 //#define LENS_DROPLETS
+#define LENS_DROPLET_AMOUNT 0.55 // [0.25 0.55 0.85]
+#define WEATHER_DEBUG 0 // [0 1 2 3 4 5] Off, roofs, wetness, pooling, materials, reflections
 
 #endif

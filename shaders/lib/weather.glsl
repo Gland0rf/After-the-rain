@@ -8,6 +8,8 @@ uniform float thunderStrength;
 uniform float frameTimeCounter;
 uniform float atrRainClimate;
 uniform float atrLightningFlash;
+uniform float atrBiomeHumidity;
+uniform float atrBiomeTemperature;
 uniform int worldTime;
 uniform bool hasSkylight;
 uniform vec3 cameraPosition;
@@ -38,6 +40,49 @@ float atrClimate() {
 
 float atrRain() { return clamp(rainStrength, 0.0, 1.0) * atrClimate(); }
 float atrWetness() { return clamp(wetness, 0.0, 1.0) * atrClimate(); }
+
+float atrHumidity() {
+    return clamp(atrBiomeHumidity, 0.0, 1.0);
+}
+
+float atrColdAir() {
+    return 1.0 - smoothstep(0.15, 0.85, atrBiomeTemperature);
+}
+
+float atrBiomeMistScale() {
+#ifdef BIOME_WEATHER
+    return mix(0.75, 1.45, atrHumidity());
+#else
+    return 1.0;
+#endif
+}
+
+float atrBiomeDryPower() {
+#ifdef BIOME_WEATHER
+    // Remap the existing weather history; no per-block water state is stored.
+    return mix(1.20, 0.72, atrHumidity()) * mix(1.05, 0.90, atrColdAir());
+#else
+    return 1.0;
+#endif
+}
+
+float atrLingeringMist() {
+#ifdef BIOME_WEATHER
+    return mix(0.08, 0.23, atrHumidity());
+#else
+    return 0.11;
+#endif
+}
+
+vec3 atrBiomeFogTint() {
+#ifdef BIOME_WEATHER
+    vec3 humid = mix(vec3(1.0), vec3(0.975, 1.012, 1.006), atrHumidity());
+    return humid * mix(vec3(1.0), vec3(0.965, 0.992, 1.035), atrColdAir());
+#else
+    return vec3(1.0);
+#endif
+}
+
 float atrClearing() {
     return clamp((wetness - rainStrength) * 2.0, 0.0, 1.0) * atrClimate();
 }

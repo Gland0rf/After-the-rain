@@ -14,6 +14,9 @@ from pathlib import Path
 import re
 import sys
 
+# Keep validation from leaving module caches inside a distributable shaderpack.
+sys.dont_write_bytecode = True
+
 ROOT = Path(__file__).resolve().parents[1]
 SHADERS = ROOT / "shaders"
 
@@ -96,8 +99,13 @@ def variants():
     result["LOW_SSR_EXTRA_RAIN"] = dict(defaults, REFLECTION_QUALITY="1", RAIN_DETAIL="2")
     result["HIGH_RAIN_DEBUG"] = dict(defaults, RAIN_DETAIL="3", RAIN_SHADER_DEBUG="1", LENS_DROPLETS=True)
     result["NO_CLOUDS"] = dict(defaults, STORM_CLOUDS=False, WIND_GUSTS=False)
+    result["ATMOSPHERE_LOW"] = dict(defaults, ATMOSPHERE_QUALITY="0")
+    result["ZERO_ATMOSPHERE"] = dict(defaults, RAIN_CURTAIN_AMOUNT="0.00", SUN_SHAFT_STRENGTH="0.00")
+    for debug in range(1, 6):
+        result[f"DEBUG_{debug}"] = dict(defaults, WEATHER_DEBUG=str(debug))
     result["FEATURES_OFF"] = {k: False if isinstance(v, bool) else v for k, v in defaults.items()}
-    result["FEATURES_OFF"].update(ROOF_DRIPS="0", LIGHTNING_RESPONSE="0.00")
+    result["FEATURES_OFF"].update(ROOF_DRIPS="0", LIGHTNING_RESPONSE="0.00",
+                                   POOLING_QUALITY="0", ATMOSPHERE_QUALITY="0")
     for path in sorted(SHADERS.glob("*.*sh")):
         source = expand(path)
         # These are parsed by Iris on the CPU before GLSL compilation. Unlike
@@ -241,7 +249,10 @@ class Context:
 
 
 def prepare(path, options):
-    text = expand(path)
+    return configure_source(expand(path), options)
+
+
+def configure_source(text, options):
     for name, value in options.items():
         define = f"#define {name}" if value is True else (
             f"// disabled: {name}" if value is False else f"#define {name} {value}")
@@ -351,13 +362,20 @@ def render_shelter_fixture(context):
         v = context.shader("#version 330 compatibility\nvoid main(){gl_Position=gl_Vertex;}",
                            0x8B31, "exposure fixture vertex")
         shaders.append(v)
-        fragment = "#version 330 compatibility\n#define IS_IRIS 1\n" + expand(SHADERS / "lib/exposure.glsl") + """
+        fragment = "#version 330 compatibility\n#define IS_IRIS 1\n" + expand(SHADERS / "lib/pooling.glsl") + """
 uniform vec3 fixtureRelativeOrigin;
 layout(location=0) out vec4 color;
 void main() {
     vec3 local = vec3((gl_FragCoord.x / 8.0 - 0.5) * 80.0, 0.0, 0.0);
     if (gl_FragCoord.x < 1.0) local.x = -0.03; // a partially covered roof-edge sample
-    color = vec4(atrExposureRelative(fixtureRelativeOrigin + local, 1.0), 0.0, 0.0, 1.75);
+    float retention = 1.0;
+    if (gl_FragCoord.y < 1.0) {
+        if (gl_FragCoord.x < 2.0) local = vec3(-0.20, 0.0625, 0.0); // raised edge
+        else if (gl_FragCoord.x < 4.0) local = vec3(0.20, 0.0, 0.0); // below the step
+        else local = vec3(10.0, 0.0, 0.0); // flat open ground
+        retention = atrGroundRetention(fixtureRelativeOrigin + local, vec3(0.0, 1.0, 0.0), 1.0);
+    }
+    color = vec4(atrExposureRelative(fixtureRelativeOrigin + local, 1.0), retention, 0.0, 1.75);
 }
 """
         f = context.shader(fragment, 0x8B30, "exposure fixture fragment")
@@ -408,9 +426,13 @@ void main() {
             edge_exposure.setdefault(origin, []).append(pixels[(4 * 8) * 4])
             assert sheltered < 0.05 and exposed > 0.95, (camera, sheltered, exposed)
             assert abs(pixels[3] - 1.75) < 0.001, "RGBA16F metadata clamped"
+            assert pixels[1] < 0.995, "Raised ledge did not drain"
+            assert pixels[3 * 4 + 1] > 1.002, "Ground below step did not retain water"
+            assert abs(pixels[6 * 4 + 1] - 1.0) < 0.002, "Flat-ground pooling changed unexpectedly"
         spread = max(max(samples) - min(samples) for samples in edge_exposure.values())
         assert spread < 0.01, f"Roof edge shifts with camera: {edge_exposure}"
         print(f"GPU roof fixture passed across movement, recentering and larger world coordinates; edge exposure spread={spread:.5f}.")
+        print("GPU terrain-pooling fixture passed: raised edge drains, lower neighbour retains, flat ground stays neutral.")
 
         # Render the actual deferred pass on a uniform damp-wood fixture while
         # changing view direction. A rough film must not turn into pale mirrors.
@@ -461,6 +483,33 @@ void main(){gl_Position=gl_Vertex; uv=gl_Vertex.xy*0.5+0.5;}
         assert values[0] != base_color, "Wet-wood fixture did not execute shading"
         assert get_error() == 0, "OpenGL error during fixture render"
         print(f"GPU wet-wood fixture passed: view-dependent RGB spread={movement:.5f}.")
+
+        # Exercise the same local-light helper used by all three weather paths.
+        fragment = "#version 330 compatibility\n" + expand(SHADERS / "lib/rain_lighting.glsl") + """
+layout(location=0) out vec4 color;
+void main() {
+    float blockLight = gl_FragCoord.x < 4.0 ? 0.10 : 0.95;
+    color = atrLightRain(vec4(0.30, 0.30, 0.30, 0.10), vec3(1.0, 0.80, 0.55), vec2(blockLight, 0.8));
+}
+"""
+        f = context.shader(fragment, 0x8B30, "lamplit-rain fixture fragment")
+        shaders.append(f)
+        lamps = context.program(v, f, "lamplit-rain fixture", retain=True)
+        programs.append(lamps)
+        use_program(lamps)
+        uniform_int(uniform_location(lamps, b"worldTime"), 18000)
+        begin(0x0007)
+        for x, y in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            vertex(x, y, 0)
+        end()
+        pixels = (C.c_float * (8 * 8 * 4))()
+        read(0, 0, 8, 8, 0x1908, 0x1406, pixels)
+        unlit = tuple(pixels[(4 * 8 + 1) * 4 + channel] for channel in range(4))
+        lit = tuple(pixels[(4 * 8 + 6) * 4 + channel] for channel in range(4))
+        assert lit[0] > unlit[0] + 0.01 and lit[0] - lit[2] > 0.04, (unlit, lit)
+        assert lit[3] > unlit[3], "Block light did not improve rain visibility"
+        assert get_error() == 0, "OpenGL error during lamplit-rain fixture"
+        print("GPU lamplit-rain fixture passed: block-lit rain is warmer and more visible.")
     finally:
         use_program(0)
         bind_fbo(0x8D40, 0)
@@ -502,6 +551,8 @@ def main():
                 links += 1
             print(f"  {name}: all shader pairs compiled and linked.", flush=True)
         render_shelter_fixture(context)
+        from weather_fixtures import render_weather_fixtures
+        render_weather_fixtures(context, SHADERS, prepare, expand, configure_source, settings()[0])
     finally:
         for shader in cache.values():
             context.delete_shader(shader)

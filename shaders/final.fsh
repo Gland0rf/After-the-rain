@@ -1,5 +1,6 @@
 #version 330 compatibility
 #include "/lib/exposure.glsl"
+#include "/lib/lens.glsl"
 
 
 uniform sampler2D colortex0;
@@ -12,10 +13,6 @@ uniform ivec2 eyeBrightnessSmooth;
 in vec2 uv;
 layout(location = 0) out vec4 color;
 
-float lensHash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
 vec3 highlight(vec2 sampleUV) {
     vec3 c = texture(colortex0, clamp(sampleUV, vec2(0.001), vec2(0.999))).rgb;
     float bright = smoothstep(0.73, 0.98, max(max(c.r, c.g), c.b));
@@ -24,6 +21,9 @@ vec3 highlight(vec2 sampleUV) {
 
 void main() {
     color = texture(colortex0, uv);
+#if WEATHER_DEBUG > 0
+    return;
+#endif
     float rain = atrRain();
     if (max(rain, atrWetness()) < 0.002 || isEyeInWater != 0) return;
 
@@ -55,27 +55,15 @@ void main() {
 
 #ifdef LENS_DROPLETS
     // Off by default: a tiny refractive film, not large blurry splotches.
-    float skyAccess = atrExposure(cameraPosition, float(eyeBrightnessSmooth.y) / 240.0);
-    float lensRain = rain * skyAccess * float(biome_precipitation == 1);
+    float skyAccess = atrExposureRelative(vec3(0.0), float(eyeBrightnessSmooth.y) / 240.0);
+    float lensRain = rain * skyAccess * float(biome_precipitation == 1) * LENS_DROPLET_AMOUNT;
     if (lensRain > 0.03) {
         float aspect = viewWidth / viewHeight;
-        vec2 gridPos = uv * vec2(12.0 * aspect, 12.0);
-        vec2 cell = floor(gridPos);
-        float seed = lensHash(cell);
-        float exists = step(0.81, seed);
-        vec2 centerOffset = vec2(lensHash(cell + 4.1), lensHash(cell + 19.3));
-        centerOffset = 0.18 + centerOffset * 0.64;
-        centerOffset.y = fract(centerOffset.y - frameTimeCounter * (0.008 + seed * 0.011));
-        vec2 displacement = (fract(gridPos) - centerOffset) * vec2(0.91, 1.22);
-        float radius = length(displacement);
-        float shape = (1.0 - smoothstep(0.10, 0.20, radius)) * exists;
-        float rim = (1.0 - smoothstep(0.17, 0.24, radius)) -
-                    (1.0 - smoothstep(0.09, 0.16, radius));
-        rim *= exists;
-        vec2 edges = abs(uv - 0.5) * 2.0;
-        float border = smoothstep(0.37, 0.88, max(edges.x, edges.y));
-        float mask = border * lensRain;
-        vec2 refractUV = uv - displacement * 0.0038 * shape;
+        vec4 drop = atrLensDrop(uv, aspect);
+        float shape = drop.z;
+        float rim = drop.w;
+        float mask = lensRain;
+        vec2 refractUV = uv - drop.xy * 0.0038;
         color.rgb = mix(color.rgb, texture(colortex0, clamp(refractUV,
                               vec2(0.001), vec2(0.999))).rgb, shape * mask * 0.54);
         color.rgb += vec3(0.050, 0.060, 0.071) * rim * mask * 0.42;

@@ -79,6 +79,23 @@ float atrExposure(vec3 worldPos, float skylight) {
     return atrExposureRelative(worldPos - cameraPosition, skylight);
 }
 
+bool atrRoofHeightRelative(vec3 relativePos, out float height) {
+    height = 0.0;
+#ifdef RAIN_SHELTER
+    vec3 clip = atrRoofClip(relativePos);
+    if (max(abs(clip.x), abs(clip.y)) > 0.88) return false;
+    vec2 tex = clip.xy * 0.5 + 0.5;
+    ivec2 size = textureSize(shadowcolor0, 0);
+    ivec2 pixel = clamp(ivec2(tex * vec2(size)), ivec2(0), size - 1);
+    vec2 roof = texelFetch(shadowcolor0, pixel, 0).rg;
+    if (roof.g < 0.5) return false;
+    height = roof.r;
+    return true;
+#else
+    return false;
+#endif
+}
+
 // Topmost captured height at a world column. G=0 means no surface was captured.
 bool atrRoofHeight(vec2 worldXZ, out float height) {
 #ifdef RAIN_SHELTER

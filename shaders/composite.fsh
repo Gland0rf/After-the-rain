@@ -1,6 +1,7 @@
 #version 330 compatibility
 #include "/lib/exposure.glsl"
 #include "/lib/drips.glsl"
+#include "/lib/atmosphere.glsl"
 /* RENDERTARGETS: 0 */
 
 
@@ -58,6 +59,9 @@ float rainStreak(vec3 p, float scale, float seed) {
 void main() {
 	vec4 source = texture(colortex0, uv);
     outColor = source;
+#if WEATHER_DEBUG > 0
+    return;
+#endif
     float rain = atrRain();
     float groundWet = atrWetness();
     if (max(max(rain, groundWet), atrLightning()) < 0.003 || isEyeInWater != 0) return;
@@ -116,16 +120,24 @@ void main() {
         float skyAccess = smoothstep(0.10, 0.65, float(eyeBrightnessSmooth.y) / 240.0);
         float density = (0.006 + rain * 0.014) * FOG_AMOUNT *
                         (0.35 + min(lowLying, 2.5) * 0.65) *
-                        (1.0 + atrThunder() * 0.45) * skyAccess;
+                        (1.0 + atrThunder() * 0.45) * skyAccess * atrBiomeMistScale();
         float fog = 1.0 - exp(-max(0.0, sceneDistance - 5.0) * density);
-        fog *= clamp(rain + groundWet * 0.11, 0.0, 1.0);
+        fog *= clamp(rain + groundWet * atrLingeringMist(), 0.0, 1.0);
         fog = min(fog, 0.76);
         vec3 stormFog = mix(vec3(0.056, 0.068, 0.084),
                             vec3(0.37, 0.405, 0.418), day);
         vec3 mistColor = mix(fogColor, stormFog, rain * 0.79);
+        mistColor *= atrBiomeFogTint();
         mistColor += vec3(0.16, 0.19, 0.25) * atrLightning();
         outColor.rgb = mix(outColor.rgb, mistColor, fog);
     }
+#endif
+
+#ifdef DISTANT_RAIN
+    vec3 curtainDirection = normalize(mat3(gbufferModelViewInverse) * viewPosition(uv, 0.70));
+    vec4 curtain = atrRainCurtain(curtainDirection, sceneDistance,
+                                 float(eyeBrightnessSmooth.y) / 240.0);
+    outColor.rgb = mix(outColor.rgb, curtain.rgb, curtain.a);
 #endif
 
 #if RAIN_DETAIL > 0
